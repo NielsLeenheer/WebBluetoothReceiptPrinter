@@ -1,12 +1,39 @@
 {
   "name": "webbluetooth-receipt-printer",
   "version": "1.0.0",
-  "module": "dist/webbluetooth-receipt-printer.esm.js",
-  "browser": "dist/webbluetooth-receipt-printer.umd.js",
+  "type": "module",
+  "exports": {
+      "browser": {
+          "import": "./dist/webbluetooth-receipt-printer.esm.js",
+          "require": "./dist/webbluetooth-receipt-printer.umd.js",
+          "script": "./dist/webbluetooth-receipt-printer.umd.js"
+      }
+  },
+  "module": "src/main.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NielsLeenheer/WebBluetoothReceiptPrinter.git"
+  },
+  "keywords": [
+    "bluetooth",
+    "webbluetooth",
+    "receipt",
+    "receiptprinter",
+    "escpos",
+    "star",
+    "epson"
+  ],
+  "author": "Niels Leenheer",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/NielsLeenheer/WebBluetoothReceiptPrinter/issues"
+  },
+  "homepage": "https://github.com/NielsLeenheer/WebBluetoothReceiptPrinter#readme",
   "devDependencies": {
-    "@rollup/plugin-commonjs": "^11.0.1",
-    "@rollup/plugin-node-resolve": "^7.0.0",
-    "rollup": "^1.29.0"
+    "@rollup/plugin-commonjs": "^24.1.0",
+    "@rollup/plugin-node-resolve": "^15.0.2",
+    "@rollup/plugin-terser": "^0.4.1",
+    "rollup": "^3.20.7"
   },
   "scripts": {
     "build": "rollup -c",

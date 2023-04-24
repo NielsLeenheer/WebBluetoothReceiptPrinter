@@ -1,15 +1,15 @@
-# webbluetooth-receipt-printer
+# WebBluetoothReceiptPrinter
 
 This is an library that allows you to print to a Bluetooth connected receipt printer using WebBluetooth.
 
-### What does this library do?
+## What does this library do?
 
 In order to print a receipt on a receipt printer you need to build the receipt and encode it as in the ESC/POS or StarPRNT language. You can use the [`ThermalPrinterEncoder`](https://github.com/NielsLeenheer/ThermalPrinterEncoder) library for this. You end up with an array of raw bytes that needs to be send to the printer. One way to do that is using this library and WebBluetooth.
 
 
-### How to use it?
+## How to use it?
 
-Load the `webbluetooth-receipt-printer.umd.js` file in the browser and instantiate a `WebBluetoothReceiptPrinter` object. 
+Load the `webbluetooth-receipt-printer.umd.js` file from the `dist` directory in the browser and instantiate a `WebBluetoothReceiptPrinter` object. 
 
     <script src='webbluetooth-receipt-printer.umd.js'></script>
 
@@ -27,8 +27,7 @@ Or import the `webbluetooth-receipt-printer.esm.js` module:
     const receiptPrinter = new WebBluetoothReceiptPrinter();
 
 
-
-### Connect to a receipt printer
+## Connect to a receipt printer
 
 The first time you have to manually connect to the receipt printer by calling the `connect()` function. This function must be called as the result of an user action, for example clicking a button. You cannot call this function on page load.
 
@@ -56,6 +55,8 @@ To find out when a receipt printer is connected you can listen for the `connecte
 
 The callback of the `connected` event is passed an object with the following properties:
 
+-   `type`<br>
+    Type of the connection that is used, in this case it is always `bluetooth`.
 -   `name`<br>
     The name of the receipt printer.
 -   `id`<br>
@@ -65,6 +66,10 @@ The callback of the `connected` event is passed an object with the following pro
 -   `codepageMapping`<br>
     Code page mapping of the printer, which can be used as an option for `ThermalPrinterEncoder` to map non-ascii characters to the correct codepage supported by the printer. 
 
+
+## Commands
+
+Once connected you can use the following command to print receipts.
 
 ### Printing receipts
 
@@ -91,7 +96,7 @@ For example:
     receiptPrinter.print(data);
 
 
-### License
+## License
 
 MIT
 

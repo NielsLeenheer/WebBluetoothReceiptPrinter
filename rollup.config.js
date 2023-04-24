@@ -1,6 +1,6 @@
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
-import pkg from './package.json';
+import terser from '@rollup/plugin-terser';
 
 export default [
 	// browser-friendly UMD build
@@ -8,25 +8,26 @@ export default [
 		input: 'src/main.js',
 		output: {
 			name: 'WebBluetoothReceiptPrinter',
-			file: pkg.browser,
+			file: 'dist/webbluetooth-receipt-printer.umd.js',
 			format: 'umd'
 		},
 		plugins: [
 			resolve(), 
-			commonjs() 
+			commonjs(),
+            terser() 
 		]
 	},
 
-	// ES module (for bundlers) build.
-	// (We could have three entries in the configuration array
-	// instead of two, but it's quicker to generate multiple
-	// builds from a single configuration where possible, using
-	// an array for the `output` option, where we can specify
-	// `file` and `format` for each target)
 	{
 		input: 'src/main.js',
-		output: [
-			{ file: pkg.module, format: 'es' }
+		output: { 
+			file: 'dist/webbluetooth-receipt-printer.esm.js', 
+			format: 'es' 
+		},
+		plugins: [
+			resolve(),
+			commonjs(),
+            terser()
 		]
 	}
 ];

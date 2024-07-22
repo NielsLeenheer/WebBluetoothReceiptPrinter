@@ -12,7 +12,7 @@ class EventEmitter {
         let fs = this._events[e];
         if (fs) {
             fs.forEach(f => {
-                f(...args);
+                setTimeout(() => f(...args), 0);
             });
         }
     }        

@@ -3,35 +3,104 @@ import CallbackQueue from "./callback-queue.js";
 
 const DeviceProfiles = [
 
-	/* Zjiang ZJ-5805 */
+	/* POS-5805, POS-8360 and similar printers */
 	{
-		filters: [
-			{ services: [ '000018f0-0000-1000-8000-00805f9b34fb' ] }
+		filters: [ 
+			{ 
+				name: 		'BlueTooth Printer',
+				services: 	[ '000018f0-0000-1000-8000-00805f9b34fb' ] 
+			}
 		],
 		
-		service:			'000018f0-0000-1000-8000-00805f9b34fb',
-		characteristic:		'00002af1-0000-1000-8000-00805f9b34fb',
+		functions: {
+			'print':		{
+				service: 		'000018f0-0000-1000-8000-00805f9b34fb',
+				characteristic:	'00002af1-0000-1000-8000-00805f9b34fb'
+			},
+
+			'status':		{
+				service: 		'000018f0-0000-1000-8000-00805f9b34fb',
+				characteristic:	'00002af0-0000-1000-8000-00805f9b34fb'
+			}
+		},
 
 		language:			'esc-pos',
 		codepageMapping:	'zjiang'
+	}, 
+
+	/* Xprinter */
+	{
+		filters: [ 
+			{ 
+				name: 		'Printer001',
+				services: 	[ '000018f0-0000-1000-8000-00805f9b34fb' ] 
+			} 
+		],
+		
+		functions: {
+			'print':		{
+				service: 		'000018f0-0000-1000-8000-00805f9b34fb',
+				characteristic:	'00002af1-0000-1000-8000-00805f9b34fb'
+			},
+
+			'status':		{
+				service: 		'000018f0-0000-1000-8000-00805f9b34fb',
+				characteristic:	'00002af0-0000-1000-8000-00805f9b34fb'
+			}
+		},
+
+		language:			'esc-pos',
+		codepageMapping:	'xprinter'
+	}, 
+
+	/* Generic printer */
+	{
+		filters: [ 
+			{ 
+				services: 	[ '000018f0-0000-1000-8000-00805f9b34fb' ] 
+			} 
+		],
+		
+		functions: {
+			'print':		{
+				service: 		'000018f0-0000-1000-8000-00805f9b34fb',
+				characteristic:	'00002af1-0000-1000-8000-00805f9b34fb'
+			},
+
+			'status':		{
+				service: 		'000018f0-0000-1000-8000-00805f9b34fb',
+				characteristic:	'00002af0-0000-1000-8000-00805f9b34fb'
+			}
+		},
+
+		language:			'esc-pos',
+		codepageMapping:	'default'
 	}
 ]
 
+class ReceiptPrinter {}
 
-class WebBluetoothReceiptPrinter {
+class WebBluetoothReceiptPrinter extends ReceiptPrinter {
+
+	#emitter;
+	#queue;
+	
+	#device = null;
+	#profile = null;
+	#characteristics = {
+		print: 	null,
+		status: null
+	};
 
 	constructor() {
-        this._internal = {
-            emitter:    		new EventEmitter(),
-			queue:				new CallbackQueue(),
-            device:     		null,
-			characteristic:		null,
-			profile:			null
-        }
+		super();
+
+		this.#emitter = new EventEmitter();
+		this.#queue = new CallbackQueue();
 
 		navigator.bluetooth.addEventListener('disconnect', event => {
-			if (this._internal.device == event.device) {
-				this._internal.emitter.emit('disconnected');
+			if (this.#device == event.device) {
+				this.#emitter.emit('disconnected');
 			}
 		});
 	}
@@ -43,7 +112,7 @@ class WebBluetoothReceiptPrinter {
 			});
 			
 			if (device) {
-				await this.open(device);
+				await this.#open(device);
 			}
 		}
 		catch(error) {
@@ -61,46 +130,108 @@ class WebBluetoothReceiptPrinter {
 		let device = devices.find(device => device.id == previousDevice.id);
 
 		if (device) {
-			await this.open(device);
+			await this.#open(device);
 		}
 	}
 
-	async open(device) {
-		this._internal.device = device;
+	async #open(device) {
+		this.#device = device;
 
-		let server = await this._internal.device.gatt.connect();
+		let server = await this.#device.gatt.connect();
 		let services = await server.getPrimaryServices();
+		let uuids = services.map(service => service.uuid);
 
-		this._internal.profile = DeviceProfiles.find(
-			item => services.some(service => item.service == service.uuid)
-		);
+		/* Find profile for device */
 
-		let service = await server.getPrimaryService(this._internal.profile.service);
-		let characteristic = await service.getCharacteristic(this._internal.profile.characteristic);
+		this.#profile = DeviceProfiles.find(item => item.filters.some(filter => this.#evaluateFilter(filter, uuids)));
 
-		this._internal.characteristic = characteristic;
+		/* Get characteristics and service for printing */
 		
-		this._internal.emitter.emit('connected', {
+		let printService = await server.getPrimaryService(this.#profile.functions.print.service);
+		
+		this.#characteristics.print = 
+			await printService.getCharacteristic(this.#profile.functions.print.characteristic);
+		
+		/* Get characteristics and service for status */
+		
+		if (this.#profile.functions.status) 
+		{
+			let statusService = await server.getPrimaryService(this.#profile.functions.status.service);
+
+			this.#characteristics.status = 
+				await statusService.getCharacteristic(this.#profile.functions.status.characteristic);
+		}
+
+		/* Emit connected event */
+
+		this.#emitter.emit('connected', {
 			type:				'bluetooth',
-			name: 				this._internal.device.name,
-			id: 				this._internal.device.id,
-			language: 			this._internal.profile.language,
-			codepageMapping:	this._internal.profile.codepageMapping
+			name: 				this.#device.name,
+			id: 				this.#device.id,
+			language: 			await this.#evaluate(this.#profile.language),
+			codepageMapping:	await this.#evaluate(this.#profile.codepageMapping)
 		});
 	}
 
+	async #evaluate(expression) {
+		if (typeof expression == 'function') {
+			return await expression(this.#device);
+		}
+
+		return expression;
+	}
+
+	#evaluateFilter(filter, uuids) {
+		if (filter.services) {
+			for (let service of filter.services) {
+				if (!uuids.includes(service)) {
+					return false;
+				}
+			}
+		}
+
+		if (filter.name) {
+			if (this.#device.name != filter.name) {
+				return false;
+			}
+		}
+
+		if (filter.namePrefix) {
+			if (!this.#device.name.startsWith(filter.namePrefix)) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+	
+	async listen() {
+		if (this.#characteristics.status) {	
+			await this.#characteristics.status.startNotifications();
+
+			this.#characteristics.status.addEventListener( "characteristicvaluechanged", (e) => {
+				this.#emitter.emit('data', e.target.value);
+			});
+
+			return true;
+		}
+
+		return false;
+	}
+
 	async disconnect() {
-		if (!this._internal.device) {
+		if (!this.#device) {
 			return;
 		}
 
-		await this._internal.device.gatt.disconnect();
+		await this.#device.gatt.disconnect();
 
-		this._internal.device = null;
-		this._internal.characteristic = null;
-		this._internal.profile = null;
+		this.#device = null;
+		this.#characteristics.print = null;
+		this.#characteristics.status = null;
+		this.#profile = null;
 
-		this._internal.emitter.emit('disconnected');
+		this.#emitter.emit('disconnected');
 	}
 	
 	print(command) {
@@ -111,23 +242,23 @@ class WebBluetoothReceiptPrinter {
 			if (chunks === 1) {
 				let data = command;
 
-				this._internal.queue.add(() => this._internal.characteristic.writeValue(data));
+				this.#queue.add(() => this.#characteristics.print.writeValueWithResponse(data));
 			} else {
 				for (let i = 0; i < chunks; i++) {
 					let byteOffset = i * maxLength;
 					let length = Math.min(command.length, byteOffset + maxLength);
 					let data = command.slice(byteOffset, length);
 
-					this._internal.queue.add(() => this._internal.characteristic.writeValue(data));
+					this.#queue.add(() => this.#characteristics.print.writeValueWithResponse(data));
 				}
 			}
 	
-			this._internal.queue.add(() => resolve());
+			this.#queue.add(() => resolve());
 		});
 	}
 
 	addEventListener(n, f) {
-		this._internal.emitter.on(n, f);
+		this.#emitter.on(n, f);
 	}
 }
 

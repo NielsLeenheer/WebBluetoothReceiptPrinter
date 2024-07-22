@@ -9,6 +9,7 @@ export default [
 		output: {
 			name: 'WebBluetoothReceiptPrinter',
 			file: 'dist/webbluetooth-receipt-printer.umd.js',
+			sourcemap: true,
 			format: 'umd'
 		},
 		plugins: [
@@ -22,6 +23,7 @@ export default [
 		input: 'src/main.js',
 		output: { 
 			file: 'dist/webbluetooth-receipt-printer.esm.js', 
+			sourcemap: true,
 			format: 'es' 
 		},
 		plugins: [

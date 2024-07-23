@@ -27,6 +27,30 @@ const DeviceProfiles = [
 		codepageMapping:	'epson'
 	},
 
+	/* Star SM-L series, for example the SM-L200 */
+	{
+		filters: [
+			{
+				namePrefix: 'STAR L'
+			}
+		],
+
+		functions: {
+			'print':		{
+				service: 		'49535343-fe7d-4ae5-8fa9-9fafd205e455',
+				characteristic:	'49535343-8841-43f4-a8d4-ecbe34729bb3'
+			},
+
+			'status':		{
+				service: 		'49535343-fe7d-4ae5-8fa9-9fafd205e455',
+				characteristic:	'49535343-1e4d-4bd9-ba61-23c647249616'
+			}
+		},
+
+		language:			'star-line',
+		codepageMapping:	'star'
+	},
+
 	/* POS-5805, POS-8360 and similar printers */
 	{
 		filters: [ 

@@ -3,6 +3,30 @@ import CallbackQueue from "./callback-queue.js";
 
 const DeviceProfiles = [
 
+	/* Epson TM-P series, for example the TM-P20II */
+	{
+		filters: [
+			{
+				namePrefix: 'TM-P'
+			}
+		],
+
+		functions: {
+			'print':		{
+				service: 		'49535343-fe7d-4ae5-8fa9-9fafd205e455',
+				characteristic:	'49535343-8841-43f4-a8d4-ecbe34729bb3'
+			},
+
+			'status':		{
+				service: 		'49535343-fe7d-4ae5-8fa9-9fafd205e455',
+				characteristic:	'49535343-1e4d-4bd9-ba61-23c647249616'
+			}
+		},
+
+		language:			'esc-pos',
+		codepageMapping:	'epson'
+	},
+
 	/* POS-5805, POS-8360 and similar printers */
 	{
 		filters: [ 
@@ -106,9 +130,12 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinter {
 	}
 
 	async connect() {
+		let filters = DeviceProfiles.map(i => i.filters).reduce((a, b) => a.concat(b));
+		let optionalServices = DeviceProfiles.map(i => Object.values(i.functions).map(f => f.service)).reduce((a, b) => a.concat(b)).filter((v, i, a) => a.indexOf(v) === i);
+
 		try {
 			let device = await navigator.bluetooth.requestDevice({ 
-				filters: DeviceProfiles.map(i => i.filters).reduce((a, b) => a.concat(b))
+				filters, optionalServices
 			});
 			
 			if (device) {

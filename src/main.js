@@ -101,6 +101,58 @@ const DeviceProfiles = [
 		codepageMapping:	'xprinter'
 	}, 
 
+	/* MPT-II printer */
+	{
+		filters: [ 
+			{ 
+				name: 		'MPT-II',
+				services: 	[ '000018f0-0000-1000-8000-00805f9b34fb' ] 
+			} 
+		],
+		
+		functions: {
+			'print':		{
+				service: 		'000018f0-0000-1000-8000-00805f9b34fb',
+				characteristic:	'00002af1-0000-1000-8000-00805f9b34fb'
+			},
+
+			'status':		{
+				service: 		'000018f0-0000-1000-8000-00805f9b34fb',
+				characteristic:	'00002af0-0000-1000-8000-00805f9b34fb'
+			}
+		},
+
+		language:			'esc-pos',
+		codepageMapping:	'mpt'
+	},
+
+	/* Cat printer */
+	{
+		filters: [ 
+			{ 
+				services: 	[ '0000ae30-0000-1000-8000-00805f9b34fb' ] 
+			} 
+		],
+		
+		functions: {
+			'print':		{
+				service: 		'0000ae30-0000-1000-8000-00805f9b34fb',
+				characteristic:	'0000ae01-0000-1000-8000-00805f9b34fb'
+			},
+
+			'notify':		{
+				service: 		'0000ae30-0000-1000-8000-00805f9b34fb',
+				characteristic:	'0000ae02-0000-1000-8000-00805f9b34fb'
+			}
+
+		},
+
+		language:			'meow',
+		codepageMapping:	'default',
+		messageSize:		200,
+		sleepAfterCommand:	30
+	},
+
 	/* Generic printer */
 	{
 		filters: [ 
@@ -285,22 +337,36 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinter {
 		this.#emitter.emit('disconnected');
 	}
 	
-	print(command) {
+	print(commands) {
 		return new Promise(resolve => {
-			const maxLength = 100;
-			let chunks = Math.ceil(command.length / maxLength);
-	
-			if (chunks === 1) {
-				let data = command;
-
-				this.#queue.add(() => this.#characteristics.print.writeValueWithResponse(data));
-			} else {
-				for (let i = 0; i < chunks; i++) {
-					let byteOffset = i * maxLength;
-					let length = Math.min(command.length, byteOffset + maxLength);
-					let data = command.slice(byteOffset, length);
+			if (ArrayBuffer.isView(commands)) {
+				commands = [ commands ];
+			}
+			
+			for (let command of commands) {
+				const maxLength = this.#profile.messageSize || 100;
+				let chunks = Math.ceil(command.length / maxLength);
+		
+				if (chunks === 1) {
+					let data = command;
 
 					this.#queue.add(() => this.#characteristics.print.writeValueWithResponse(data));
+
+					if (this.#profile.sleepAfterCommand) {
+						this.#queue.sleep(this.#profile.sleepAfterCommand);
+					}
+				} else {
+					for (let i = 0; i < chunks; i++) {
+						let byteOffset = i * maxLength;
+						let length = Math.min(command.length, byteOffset + maxLength);
+						let data = command.slice(byteOffset, length);
+
+						this.#queue.add(() => this.#characteristics.print.writeValueWithResponse(data));
+
+						if (this.#profile.sleepAfterCommand) {
+							this.#queue.sleep(this.#profile.sleepAfterCommand);
+						}	
+					}
 				}
 			}
 	

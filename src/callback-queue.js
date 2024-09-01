@@ -27,6 +27,10 @@ class CallbackQueue {
             run();
         }
     }
+
+    sleep(ms) {
+        this.add(() => new Promise(resolve => setTimeout(resolve, ms)));
+    }
 }
 
 export default CallbackQueue;

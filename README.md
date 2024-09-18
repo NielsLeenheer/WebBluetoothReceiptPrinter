@@ -4,7 +4,7 @@ This is an library that allows you to print to a Bluetooth connected receipt pri
 
 ## What does this library do?
 
-In order to print a receipt on a receipt printer you need to build the receipt and encode it as in the ESC/POS or StarPRNT language. You can use the [`ThermalPrinterEncoder`](https://github.com/NielsLeenheer/ThermalPrinterEncoder) library for this. You end up with an array of raw bytes that needs to be send to the printer. One way to do that is using this library and WebBluetooth.
+In order to print a receipt on a receipt printer you need to build the receipt and encode it as in the ESC/POS or StarPRNT language. You can use the [`ReceiptPrinterEncoder`](https://github.com/NielsLeenheer/ReceiptPrinterEncoder) library for this. You end up with an array of raw bytes that needs to be send to the printer. One way to do that is using this library and WebBluetooth.
 
 
 ## How to use it?
@@ -62,9 +62,9 @@ The callback of the `connected` event is passed an object with the following pro
 -   `id`<br>
     A unique id for the receipt printer. To be used to reconnect to the printer at a later time.
 -   `language`<br>
-    Language of the printer, which can be either `esc-pos` or `star-prnt`. This can be used as an option for `ThermalPrinterEncoder` to encode in the correct language for the printer.
+    Language of the printer, which can be either `esc-pos` or `star-prnt`. This can be used as an option for `ReceiptPrinterEncoder` to encode in the correct language for the printer.
 -   `codepageMapping`<br>
-    Code page mapping of the printer, which can be used as an option for `ThermalPrinterEncoder` to map non-ascii characters to the correct codepage supported by the printer. 
+    Code page mapping of the printer, which can be used as an option for `ReceiptPrinterEncoder` to map non-ascii characters to the correct codepage supported by the printer. 
 
 
 ## Commands
@@ -79,7 +79,7 @@ For example:
 
     /* Encode the receipt */
 
-    let encoder = new ThermalPrinterEncoder({
+    let encoder = new ReceiptPrinterEncoder({
         language:  printerLanguage,
         codepageMapping: printerCodepageMapping
     });

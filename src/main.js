@@ -178,9 +178,9 @@ const DeviceProfiles = [
 	}
 ]
 
-class ReceiptPrinter {}
+class ReceiptPrinterDriver {}
 
-class WebBluetoothReceiptPrinter extends ReceiptPrinter {
+class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 
 	#emitter;
 	#queue;

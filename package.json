@@ -7,7 +7,9 @@
           "import": "./dist/webbluetooth-receipt-printer.esm.js",
           "require": "./dist/webbluetooth-receipt-printer.umd.js",
           "script": "./dist/webbluetooth-receipt-printer.umd.js"
-      }
+      },
+      "import": "./dist/webbluetooth-receipt-printer.esm.js",
+      "require": "./dist/webbluetooth-receipt-printer.umd.js"
   },
   "module": "src/main.js",
   "repository": {

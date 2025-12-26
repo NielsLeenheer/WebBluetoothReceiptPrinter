@@ -231,10 +231,33 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 		let devices = await navigator.bluetooth.getDevices();
 
 		let device = devices.find(device => device.id == previousDevice.id);
+		// Have to wait for device to advertise before we can reconnect
+		// otherwise we get a Bluetooth Device is no longer in range error
+		// See https://github.com/NielsLeenheer/WebBluetoothReceiptPrinter/issues/2
+		// See https://issues.chromium.org/issues/40167015#comment4
+		await device.watchAdvertisements();
+		// wait until in range
+		await new Promise((resolve, reject) => {
+			let timeout = setTimeout(() => {
+				device.onadvertisementreceived = undefined;
+				reject(new Error('Reconnection timeout after 5 seconds'));
+			}, 5000);
+			device.onadvertisementreceived = async (e) => {
+					if (this.#device?.gatt?.connected) {
+					clearTimeout(timeout);
+					device.onadvertisementreceived = undefined;
+						resolve();
+					return;
+					}
 
-		if (device) {
-			await this.#open(device);
-		}
+				await this.#open(device);
+				if (this.#device?.gatt?.connected) {
+					clearTimeout(timeout);
+					device.onadvertisementreceived = undefined;
+					resolve();
+				}
+			}
+		})
 	}
 
 	async #open(device) {

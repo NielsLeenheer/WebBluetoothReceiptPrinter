@@ -18,7 +18,8 @@ const Wrappers = {
 
 const CodepageMappings = {
 	'esc-pos':			'epson',
-	'star-prnt':		'star'
+	'star-prnt':		'star',
+	'star-line':		'star'
 };
 
 /*
@@ -30,8 +31,8 @@ const ResumeTimeout = 30000;
 
 /*
 	The settings of a graphics section that are passed on to the renderer when the profile
-	has them, next to the width, the supported commands and the codepage mapping, which it
-	always has.
+	has them, next to the language, the width, the supported commands and the codepage
+	mapping, which it always has.
 */
 
 const RendererSettings = [ 'maxHeight', 'feedThreshold' ];
@@ -208,8 +209,14 @@ const DeviceProfiles = [
 
 		/*
 			The cat printers have no fonts and no barcode engine, they only print
-			bitmap rows. The driver renders the job and packs the images itself, the
-			language of the profile is the key of the graphics section that does it.
+			bitmap rows. When the application passed a renderer, the driver renders the
+			job and packs the images itself, the language of the profile being the key of
+			the graphics section that does it. Without one the packets of the protocol
+			are passed on the way they always were, which leaves them to the application.
+
+			The language of the section is the language the renderer has to encode, which
+			is the language the application encodes its receipt in. These printers are not
+			Star and not Epson, so ESC/POS it is, the language most encoders speak.
 
 			The feedThreshold is tunable as well. White rows cost as much to send as
 			printed ones, so a short gap between two lines of text is better spent on a
@@ -220,6 +227,7 @@ const DeviceProfiles = [
 
 		graphics:			{
 								'meow': {
+									language:		'esc-pos',
 									width:			384,
 									commands:		[ 'feed' ],
 									wrapper:		'meow',
@@ -258,11 +266,9 @@ const DeviceProfiles = [
 class ReceiptPrinterDriver {}
 
 /*
-	Everything that can go wrong around the renderer of a graphics printer: no renderer
-	was passed, the renderer option is not a renderer, or the profile names a wrapper
-	that does not exist. These are programming errors an application has to see, so
-	connect() rejects with them instead of swallowing them the way it swallows a user
-	who closes the device dialog.
+	Thrown when the renderer option is not a renderer. That is a programming error an
+	application has to see, so connect() rejects with it instead of swallowing it the way
+	it swallows a user who closes the device dialog.
 */
 
 class RendererError extends Error {}
@@ -331,10 +337,10 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 		}
 		catch(error) {
 			/*
-				A printer that can only print graphics without a usable renderer would
-				otherwise print nothing at all and say nothing about it, which is hard
-				to diagnose, so that one error is passed on to the caller. Everything
-				else keeps the old behaviour and only logs.
+				A renderer option that is not a renderer is a mistake in the application,
+				which would otherwise print nothing at all and say nothing about it, so
+				that one error is passed on to the caller. Everything else keeps the old
+				behaviour and only logs.
 			*/
 
 			if (error instanceof RendererError) {
@@ -401,9 +407,13 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 		let codepageMapping = await this.#evaluate(this.#profile.codepageMapping);
 
 		/*
-			A printer that can only print images. The renderer turns the bytes the
-			application sends into images, and the wrapper of the profile turns those
-			into the packets the printer understands.
+			A printer that can only print images. When the application passed a renderer,
+			it turns the bytes the application sends into images, and the wrapper of the
+			profile turns those into the packets the printer understands.
+
+			Without a renderer the driver does what it has always done: it reports the
+			language of the printer itself and passes the bytes of the application on
+			unchanged, which leaves it to the application to build the packets.
 		*/
 
 		let graphics = this.#profile.graphics ? this.#profile.graphics[language] : null;
@@ -414,71 +424,72 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 
 		if (graphics) {
 			try {
-				/*
-					A setting of a graphics section may be a function of the device, the
-					same way the language and the codepage mapping of a profile may be,
-					so that one profile can serve models with different print widths.
-				*/
-
-				graphics = await this.#settings(graphics);
-
 				let Renderer = await this.#resolve(this.#options.renderer);
 
-				if (!Renderer) {
-					throw new RendererError('This printer only supports graphics, pass the renderer option with the EscPosRenderer or StarPrntRenderer class from @point-of-sale/receipt-printer-renderer');
-				}
+				if (Renderer) {
+					/*
+						A setting of a graphics section may be a function of the device, the
+						same way the language and the codepage mapping of a profile may be,
+						so that one profile can serve models with different print widths.
+					*/
 
-				let wrapper = Wrappers[graphics.wrapper];
+					graphics = await this.#settings(graphics);
 
-				if (!wrapper) {
-					throw new RendererError('The profile of this printer names a wrapper that does not exist: ' + graphics.wrapper);
-				}
+					let wrapper = Wrappers[graphics.wrapper];
 
-				/*
-					The language and the codepage mapping of a graphics printer are those
-					of the renderer. The width and the supported commands are those of the
-					printer, so they win over anything the application passed.
-				*/
-
-				language = Renderer.language;
-				codepageMapping = CodepageMappings[language] || codepageMapping;
-
-				let settings = {
-					width:				graphics.width,
-					commands:			graphics.commands,
-					codepageMapping:	codepageMapping
-				};
-
-				/*
-					The settings that shape the images belong to the printer as well, but
-					only when its profile has them. One that it does not set is left to the
-					rendererOptions of the application and to the default of the renderer,
-					rather than being overruled with an undefined.
-				*/
-
-				for (let key of RendererSettings) {
-					if (typeof graphics[key] != 'undefined') {
-						settings[key] = graphics[key];
+					if (!wrapper) {
+						throw new Error('The profile of this printer names a wrapper that does not exist: ' + graphics.wrapper);
 					}
-				}
 
-				this.#renderer = new Renderer(Object.assign({}, this.#options.rendererOptions, settings));
+					/*
+						The language of a rendered printer is the language the profile asks
+						the renderer for, and the codepage mapping is the one that belongs to
+						that language. The width and the supported commands are those of the
+						printer, so they win over anything the application passed.
+					*/
 
-				this.#graphics = graphics;
-				this.#wrapper = wrapper;
+					codepageMapping = CodepageMappings[graphics.language] || codepageMapping;
 
-				/*
-					The printer asks the driver to stop writing over the notify
-					characteristic, so it is subscribed here and not only when the
-					application asks for it with listen(). Flow control is not optional
-					on this link, so a subscription that fails fails the connection.
-				*/
+					let settings = {
+						language:			graphics.language,
+						width:				graphics.width,
+						commands:			graphics.commands,
+						codepageMapping:	codepageMapping
+					};
 
-				try {
-					await this.#subscribe('notify');
-				}
-				catch(error) {
-					throw new RendererError('This printer needs its notify characteristic for flow control, but it could not be subscribed: ' + error);
+					/*
+						The settings that shape the images belong to the printer as well, but
+						only when its profile has them. One that it does not set is left to the
+						rendererOptions of the application and to the default of the renderer,
+						rather than being overruled with an undefined.
+					*/
+
+					for (let key of RendererSettings) {
+						if (typeof graphics[key] != 'undefined') {
+							settings[key] = graphics[key];
+						}
+					}
+
+					this.#renderer = new Renderer(Object.assign({}, this.#options.rendererOptions, settings));
+
+					this.#graphics = graphics;
+					this.#wrapper = wrapper;
+
+					language = this.#renderer.language;
+
+					/*
+						The printer asks the driver to stop writing over the notify
+						characteristic, so it is subscribed here and not only when the
+						application asks for it with listen(). Flow control is not optional
+						on this link, so a subscription that fails fails the connection.
+					*/
+
+					try {
+						await this.#subscribe('notify');
+					}
+					catch(error) {
+						throw new Error('This printer needs its notify characteristic for flow control, but it could not be subscribed: ' + error);
+					}
 				}
 			}
 			catch(error) {
@@ -504,13 +515,13 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 		};
 
 		/*
-			Only a graphics printer knows how many columns it has, it is the print width
+			Only a rendered printer knows how many columns it has, it is the print width
 			divided by the twelve dots of a font A character. For other printers the
 			application decides, as it always has.
 		*/
 
-		if (graphics) {
-			connected.columns = graphics.width / 12;
+		if (this.#graphics) {
+			connected.columns = this.#graphics.width / 12;
 		}
 
 		this.#emitter.emit('connected', connected);
@@ -538,21 +549,21 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 		}
 
 		/*
-			A renderer class is a function with a static language property. Any other
+			The renderer class is a function with a static languages array. Any other
 			function is a loader, which returns the class, possibly as a promise.
 		*/
 
 		try {
-			if (typeof renderer == 'function' && typeof renderer.language != 'string') {
+			if (typeof renderer == 'function' && !Array.isArray(renderer.languages)) {
 				renderer = await renderer();
 			}
 		}
 		catch(error) {
-			throw new RendererError('The renderer option must be a renderer class, or a function that returns one');
+			throw new RendererError('The renderer option must be the ReceiptPrinterRenderer class, or a function that returns it');
 		}
 
-		if (typeof renderer != 'function' || typeof renderer.language != 'string') {
-			throw new RendererError('The renderer option must be a renderer class, or a function that returns one');
+		if (typeof renderer != 'function' || !Array.isArray(renderer.languages)) {
+			throw new RendererError('The renderer option must be the ReceiptPrinterRenderer class, or a function that returns it');
 		}
 
 		return renderer;
@@ -597,9 +608,9 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 	#handle(value) {
 		/*
 			The cat printers ask the driver to stop writing when their buffer is full and
-			to continue when it has room again. Only a graphics printer speaks this, the
-			status characteristic of an ordinary printer carries status bytes that must
-			never be read as flow control.
+			to continue when it has room again. Only a printer the driver renders for
+			speaks this, the status characteristic of an ordinary printer carries status
+			bytes that must never be read as flow control.
 		*/
 
 		if (this.#graphics) {
@@ -798,7 +809,7 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 	
 	async listen() {
 		/*
-			The notify characteristic of a graphics printer is already subscribed during
+			The notify characteristic of a rendered printer is already subscribed during
 			open, and a subscription is never made twice, so calling this is harmless.
 		*/
 
@@ -879,10 +890,11 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 			this.#jobs.add(settle);
 
 			/*
-				A graphics printer does not understand the language the application
-				encoded the receipt in, so the whole job is rendered to images first and
-				then wrapped in the packets of the printer. The raw bytes are never sent
-				to such a printer, they would print garbage.
+				A graphics printer with a renderer does not understand the language the
+				application encoded the receipt in, so the whole job is rendered to images
+				first and then wrapped in the packets of the printer. Without a renderer
+				the bytes are chunked and paced the way they always were, and building the
+				packets is up to the application.
 
 				The packets are small, a row is at most 56 bytes, and every write costs a
 				sleep of the profile, so as many whole packets as fit go into one write.

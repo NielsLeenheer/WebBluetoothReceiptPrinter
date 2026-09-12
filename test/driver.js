@@ -117,13 +117,25 @@ function install(uuid, name) {
 	return state;
 }
 
-/* A stand in for the renderer package, which this repository does not depend on */
+/*
+	A stand in for the renderer package, which this repository does not depend on. The
+	class announces the languages it can encode, the instance is the one the driver asked
+	for with the language option.
+*/
 
 class FakeRenderer {
-	static language = 'esc-pos';
+	static languages = [ 'esc-pos', 'star-prnt', 'star-line' ];
+
+	#language;
 
 	constructor(options) {
 		FakeRenderer.options = options;
+
+		this.#language = options.language;
+	}
+
+	get language() {
+		return this.#language;
 	}
 
 	render(bytes) {
@@ -143,7 +155,17 @@ class FakeRenderer {
 */
 
 class TallFakeRenderer {
-	static language = 'esc-pos';
+	static languages = [ 'esc-pos' ];
+
+	#language;
+
+	constructor(options) {
+		this.#language = options.language;
+	}
+
+	get language() {
+		return this.#language;
+	}
 
 	render() {
 		return [
@@ -168,21 +190,32 @@ describe('driver', () => {
 
 	describe('a cat printer', () => {
 
-		it('should reject connect() without a renderer', async () => {
+		it('should report its own language and pass the bytes through without a renderer', async () => {
 			let state = install(Services.cat, 'GB01');
 			let printer = new WebBluetoothReceiptPrinter();
-			let error = null;
+			let connected = null;
 
-			try {
-				await printer.connect();
-			}
-			catch(e) {
-				error = e;
-			}
+			printer.addEventListener('connected', d => connected = d);
 
-			expect(error).to.be.an.instanceof(Error);
-			expect(error.message).to.contain('only supports graphics');
-			expect(state.disconnects).to.equal(1);
+			await printer.connect();
+			await wait();
+
+			/* No renderer, so no columns and the protocol of the printer as the language */
+
+			expect(connected).to.deep.equal({
+				type:				'bluetooth',
+				name:				'GB01',
+				id:					'device-1',
+				language:			'meow',
+				codepageMapping:	'default'
+			});
+
+			await printer.print(new Uint8Array(250));
+
+			/* The bytes of the application, chunked by the messageSize of the profile */
+
+			expect(state.writes.map(i => i.length)).to.deep.equal([ 200, 50 ]);
+			expect(state.disconnects).to.equal(0);
 		});
 
 		it('should reject connect() with a renderer that is not one', async () => {
@@ -198,24 +231,28 @@ describe('driver', () => {
 				error = e;
 			}
 
-			expect(error.message).to.equal('The renderer option must be a renderer class, or a function that returns one');
+			expect(error.message).to.equal('The renderer option must be the ReceiptPrinterRenderer class, or a function that returns it');
 		});
 
-		it('should reject connect() when the notify characteristic refuses', async () => {
+		it('should take the connection down when the notify characteristic refuses', async () => {
 			let state = install(Services.cat, 'GB01');
 			state.failNotify = true;
 
 			let printer = new WebBluetoothReceiptPrinter({ renderer: FakeRenderer });
-			let error = null;
+			let connected = null;
 
-			try {
-				await printer.connect();
-			}
-			catch(e) {
-				error = e;
-			}
+			printer.addEventListener('connected', d => connected = d);
 
-			expect(error.message).to.contain('notify characteristic for flow control');
+			await printer.connect();
+			await wait();
+
+			/*
+				Flow control is not optional on this link, so a subscription that fails
+				fails the connection. It is not a mistake of the application, so it is
+				logged like every other failure to connect rather than thrown.
+			*/
+
+			expect(connected).to.equal(null);
 			expect(state.disconnects).to.equal(1);
 		});
 
@@ -252,6 +289,7 @@ describe('driver', () => {
 
 			expect(FakeRenderer.options).to.deep.equal({
 				font:				'x',
+				language:			'esc-pos',
 				width:				384,
 				commands:			[ 'feed' ],
 				maxHeight:			256,

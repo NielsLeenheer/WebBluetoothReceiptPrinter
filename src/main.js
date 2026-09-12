@@ -26,7 +26,7 @@ const CodepageMappings = {
 	writing, before it continues anyway. A graphics section can set its own.
 */
 
-const ResumeTimeout = 3000;
+const ResumeTimeout = 30000;
 
 /*
 	The settings of a graphics section that are passed on to the renderer when the profile
@@ -225,7 +225,7 @@ const DeviceProfiles = [
 									wrapper:		'meow',
 									maxHeight:		256,
 									feedThreshold:	4,
-									resumeTimeout:	3000
+									resumeTimeout:	30000
 								}
 							}
 	},
@@ -632,7 +632,7 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 		let timeout = this.#graphics.resumeTimeout || ResumeTimeout;
 
 		this.#timer = setTimeout(() => {
-			console.log('Did not receive a resume from the printer within ' + timeout + ' ms, continuing anyway');
+			console.warn('Did not receive a resume from the printer within ' + timeout + ' ms, continuing anyway, the output may be corrupted');
 
 			this.#resume();
 		}, timeout);

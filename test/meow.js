@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { wrap, packet, crc8, reverseBits } from '../src/wrappers/meow.js';
+import { wrap, packet, crc8, reverseBits, encodeRow, runLengthEncode } from '../src/wrappers/meow.js';
 
 /*
 	The expected bytes are written out in full, so that a mistake in the wrapper cannot
@@ -73,6 +73,34 @@ function row(fill) {
 	return data;
 }
 
+/*
+	The other half of the run length encoding, written out here rather than imported, so
+	that a row can be encoded and decoded again and compared with what went in. A run byte
+	is the value of the dots in bit 7 and the length of the run in bits 0 to 6.
+*/
+
+function decode(payload) {
+	let dots = [];
+
+	for (let byte of payload) {
+		let value = (byte >> 7) & 0x01;
+
+		for (let i = 0; i < (byte & 0x7f); i++) {
+			dots.push(value);
+		}
+	}
+
+	let data = new Uint8Array(Math.ceil(dots.length / 8));
+
+	for (let i = 0; i < dots.length; i++) {
+		if (dots[i]) {
+			data[i >> 3] |= 0x80 >> (i & 0x07);
+		}
+	}
+
+	return { dots: dots.length, data: data };
+}
+
 
 describe('meow', () => {
 
@@ -130,6 +158,94 @@ describe('meow', () => {
 		});
 	});
 
+	describe('runLengthEncode()', () => {
+
+		it('should encode a white row as runs of 127 and a remainder', () => {
+			expect(runLengthEncode(row(() => 0x00))).to.deep.equal([ 0x7f, 0x7f, 0x7f, 0x03 ]);
+		});
+
+		it('should encode a black row as runs of 127 and a remainder with the value bit set', () => {
+			expect(runLengthEncode(row(() => 0xff))).to.deep.equal([ 0xff, 0xff, 0xff, 0x83 ]);
+		});
+
+		it('should encode a single dot at each end of the row', () => {
+			let data = row(i => i == 0 ? 0x80 : (i == 47 ? 0x01 : 0x00));
+
+			expect(runLengthEncode(data)).to.deep.equal([ 0x81, 0x7f, 0x7f, 0x7f, 0x01, 0x81 ]);
+		});
+
+		it('should need one byte per dot for alternating single dots', () => {
+			expect(runLengthEncode(row(() => 0xaa)).length).to.equal(384);
+		});
+
+		it('should cover every dot of the row', () => {
+			for (let data of [ row(() => 0x00), row(() => 0xff), row(() => 0xaa), row(i => i % 3) ]) {
+				expect(decode(runLengthEncode(data)).dots).to.equal(384);
+			}
+		});
+
+		it('should round trip a row that looks like a line of text', () => {
+			/* Two groups of glyph shaped dots in a row that is otherwise white */
+
+			let glyphs = [ 0x3c, 0x66, 0x60, 0x7e, 0x18, 0x18, 0x00, 0x7e ];
+			let data = row(i => i >= 4 && i < 12 ? glyphs[i - 4] : (i >= 20 && i < 24 ? glyphs[i - 20] : 0x00));
+
+			let payload = runLengthEncode(data);
+
+			expect(payload.length).to.equal(28);
+			expect(decode(payload).data).to.deep.equal(data);
+		});
+
+		it('should round trip random rows', () => {
+			for (let attempt = 0; attempt < 100; attempt++) {
+				let data = row(() => Math.floor(Math.random() * 256));
+				let result = decode(runLengthEncode(data));
+
+				expect(result.dots).to.equal(384);
+				expect(result.data).to.deep.equal(data);
+			}
+		});
+
+		it('should round trip a row of any width', () => {
+			let data = new Uint8Array([ 0xf0, 0x00, 0x01 ]);
+
+			expect(runLengthEncode(data)).to.deep.equal([ 0x84, 0x13, 0x81 ]);
+			expect(decode(runLengthEncode(data)).data).to.deep.equal(data);
+		});
+	});
+
+	describe('encodeRow()', () => {
+
+		it('should compress a row that is worth compressing', () => {
+			let data = row(i => i == 0 ? 0x80 : (i == 47 ? 0x01 : 0x00));
+
+			expect(encodeRow(data)).to.deep.equal({
+				command:	0xbf,
+				payload:	[ 0x81, 0x7f, 0x7f, 0x7f, 0x01, 0x81 ]
+			});
+		});
+
+		it('should compress a white row to four bytes', () => {
+			expect(encodeRow(row(() => 0x00)).payload.length).to.equal(4);
+		});
+
+		it('should fall back to the raw row for alternating single dots', () => {
+			let result = encodeRow(row(() => 0xaa));
+
+			expect(result.command).to.equal(0xa2);
+			expect(Array.from(result.payload)).to.deep.equal(new Array(48).fill(0x55));
+		});
+
+		it('should reverse the bits of a raw row and leave a compressed one alone', () => {
+			expect(Array.from(encodeRow(row(() => 0x4d)).payload)).to.deep.equal(new Array(48).fill(0xb2));
+			expect(encodeRow(row(() => 0x0f)).command).to.equal(0xa2);
+		});
+
+		it('should return a typed array for a raw row', () => {
+			expect(encodeRow(row(() => 0xaa)).payload).to.be.an.instanceof(Uint8Array);
+		});
+	});
+
 	describe('packet()', () => {
 
 		it('should frame a one byte payload', () => {
@@ -178,8 +294,10 @@ describe('meow', () => {
 	describe('wrap([ image of 384 by 2 ])', () => {
 
 		/*
-			The first row has the leftmost and the rightmost dot of the paper, the second
-			row is a run of 0x4d bytes. Reversed those are 01 .. 80 and b2.
+			The first row has the leftmost and the rightmost dot of the paper, which is six
+			bytes of runs, so it is sent compressed. The second row is a run of 0x4d bytes,
+			six runs per byte, which needs 288 bytes and is therefore sent raw, with every
+			byte reversed to b2.
 		*/
 
 		let first = row(i => i == 0 ? 0x80 : (i == 47 ? 0x01 : 0x00));
@@ -196,15 +314,10 @@ describe('meow', () => {
 		let expected = [
 			...start,
 
-			/* 48 bytes, 80 .. 01 reversed to 01 .. 80 */
-			0x51, 0x78, 0xa2, 0x00, 0x30, 0x00,
-			0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80,
-			0x81, 0xff,
+			/* one black dot, 382 white ones as three runs of 127 and one of one, one black dot */
+			0x51, 0x78, 0xbf, 0x00, 0x06, 0x00,
+			0x81, 0x7f, 0x7f, 0x7f, 0x01, 0x81,
+			0x30, 0xff,
 
 			/* 48 bytes of 4d, reversed to b2 */
 			0x51, 0x78, 0xa2, 0x00, 0x30, 0x00,
@@ -219,15 +332,23 @@ describe('meow', () => {
 			...end
 		];
 
-		it('should send one bit reversed row per packet', () => {
+		it('should send one row per packet, compressed where that is shorter', () => {
 			expect(bytes(wrap(items, { width: 384 }))).to.deep.equal(expected);
 		});
 
-		it('should reverse the first row to 01 in the first byte and 80 in the last', () => {
+		it('should choose the row format per row', () => {
 			let packets = wrap(items, { width: 384 });
 
-			expect(packets[7][6]).to.equal(0x01);
-			expect(packets[7][53]).to.equal(0x80);
+			expect(packets[7][2]).to.equal(0xbf);
+			expect(packets[8][2]).to.equal(0xa2);
+		});
+
+		it('should encode the first row as runs that decode to the row again', () => {
+			let packets = wrap(items, { width: 384 });
+			let result = decode(packets[7].slice(6, packets[7].length - 2));
+
+			expect(result.dots).to.equal(384);
+			expect(result.data).to.deep.equal(first);
 		});
 
 		it('should reverse every byte of the second row', () => {
@@ -243,12 +364,38 @@ describe('meow', () => {
 			{ type: 'image', width: 16, height: 1, data: new Uint8Array([ 0xff, 0x0f ]) }
 		];
 
-		it('should pad the row with zeroes up to 48 bytes', () => {
+		it('should pad the row with white up to the full width of the print head', () => {
+			let packets = wrap(items, { width: 384 });
+
+			/* twelve black dots, then 372 white ones as two runs of 127 and one of 118 */
+
+			expect(Array.from(packets[7])).to.deep.equal([
+				0x51, 0x78, 0xbf, 0x00, 0x06, 0x00,
+				0x88, 0x04, 0x84, 0x7f, 0x7f, 0x72,
+				0x5d, 0xff
+			]);
+
+			let result = decode(packets[7].slice(6, 12));
+			let expected = new Uint8Array(48);
+
+			expected[0] = 0xff;
+			expected[1] = 0x0f;
+
+			expect(result.dots).to.equal(384);
+			expect(result.data).to.deep.equal(expected);
+		});
+
+		it('should pad a raw row with zeroes up to 48 bytes', () => {
+			/* Two hundred alternating dots do not compress, so this row is sent as a bitmap */
+
+			let items = [
+				{ type: 'image', width: 200, height: 1, data: new Uint8Array(25).fill(0xaa) }
+			];
+
 			let packets = wrap(items, { width: 384 });
 			let expected = new Array(48).fill(0x00);
 
-			expected[0] = 0xff;
-			expected[1] = 0xf0;
+			expected.fill(0x55, 0, 25);
 
 			expect(Array.from(packets[7].slice(6, 54))).to.deep.equal(expected);
 			expect(packets[7].length).to.equal(56);

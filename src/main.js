@@ -28,6 +28,14 @@ const CodepageMappings = {
 
 const ResumeTimeout = 3000;
 
+/*
+	The settings of a graphics section that are passed on to the renderer when the profile
+	has them, next to the width, the supported commands and the codepage mapping, which it
+	always has.
+*/
+
+const RendererSettings = [ 'maxHeight', 'feedThreshold' ];
+
 const DeviceProfiles = [
 
 	/* Epson TM-P series, for example the TM-P20II */
@@ -185,13 +193,29 @@ const DeviceProfiles = [
 
 		language:			'meow',
 		codepageMapping:	'default',
+
+		/*
+			The two values that decide how long a receipt takes. The driver fills a write
+			with as many whole packets as fit in messageSize bytes and sleeps
+			sleepAfterCommand between the writes, which is what the reference
+			implementation does with 200 byte writes and 20 ms. They are tunable: a
+			printer that drops packets needs a longer sleep, and the flow control of the
+			notify characteristic catches the rest.
+		*/
+
 		messageSize:		200,
-		sleepAfterCommand:	30,
+		sleepAfterCommand:	20,
 
 		/*
 			The cat printers have no fonts and no barcode engine, they only print
 			bitmap rows. The driver renders the job and packs the images itself, the
 			language of the profile is the key of the graphics section that does it.
+
+			The feedThreshold is tunable as well. White rows cost as much to send as
+			printed ones, so a short gap between two lines of text is better spent on a
+			feed packet of two bytes than on a few dozen white rows. Four dot rows is
+			low enough to catch the gaps inside a receipt without turning every line into
+			its own image.
 		*/
 
 		graphics:			{
@@ -200,6 +224,7 @@ const DeviceProfiles = [
 									commands:		[ 'feed' ],
 									wrapper:		'meow',
 									maxHeight:		256,
+									feedThreshold:	4,
 									resumeTimeout:	3000
 								}
 							}
@@ -418,12 +443,26 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 				language = Renderer.language;
 				codepageMapping = CodepageMappings[language] || codepageMapping;
 
-				this.#renderer = new Renderer(Object.assign({}, this.#options.rendererOptions, {
+				let settings = {
 					width:				graphics.width,
 					commands:			graphics.commands,
-					maxHeight:			graphics.maxHeight,
 					codepageMapping:	codepageMapping
-				}));
+				};
+
+				/*
+					The settings that shape the images belong to the printer as well, but
+					only when its profile has them. One that it does not set is left to the
+					rendererOptions of the application and to the default of the renderer,
+					rather than being overruled with an undefined.
+				*/
+
+				for (let key of RendererSettings) {
+					if (typeof graphics[key] != 'undefined') {
+						settings[key] = graphics[key];
+					}
+				}
+
+				this.#renderer = new Renderer(Object.assign({}, this.#options.rendererOptions, settings));
 
 				this.#graphics = graphics;
 				this.#wrapper = wrapper;
@@ -667,6 +706,41 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 	}
 
 	/**
+	 * Pack packets into writes of at most maxLength bytes
+	 *
+	 * A packet is never split over two writes, so a packet that is longer than maxLength
+	 * by itself, which the wrapper of the cat printers never produces, gets its own write
+	 * rather than being cut in half.
+	 *
+	 * @param  {Array}       packets    The packets of the job, each a typed array
+	 * @param  {number}      maxLength  The largest write the printer accepts
+	 * @return {Array}                  The writes, each a Uint8Array of whole packets
+	 */
+	#batch(packets, maxLength) {
+		let writes = [];
+		let batch = [];
+		let length = 0;
+
+		for (let packet of packets) {
+			if (batch.length && length + packet.length > maxLength) {
+				writes.push(this.#join(batch));
+
+				batch = [];
+				length = 0;
+			}
+
+			batch.push(packet);
+			length += packet.length;
+		}
+
+		if (batch.length) {
+			writes.push(this.#join(batch));
+		}
+
+		return writes;
+	}
+
+	/**
 	 * Write one chunk to the printer, if there still is one
 	 *
 	 * @param  {Uint8Array}  data       The bytes to write
@@ -807,14 +881,20 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 			/*
 				A graphics printer does not understand the language the application
 				encoded the receipt in, so the whole job is rendered to images first and
-				then wrapped in the packets of the printer, one packet per write. The
-				raw bytes are never sent to such a printer, they would print garbage.
+				then wrapped in the packets of the printer. The raw bytes are never sent
+				to such a printer, they would print garbage.
+
+				The packets are small, a row is at most 56 bytes, and every write costs a
+				sleep of the profile, so as many whole packets as fit go into one write.
+				A receipt of six hundred packets becomes some eighty writes that way.
+				Flow control is not lost: the queue checks its gate before every write, so
+				a pause that arrives between two batches stops the next one.
 			*/
 
 			if (this.#graphics) {
 				let packets = this.#wrapper(this.#renderer.render(this.#join(commands)), this.#graphics);
 
-				for (let data of packets) {
+				for (let data of this.#batch(packets, this.#profile.messageSize || 100)) {
 					this.#queue.add(() => this.#write(data));
 
 					if (this.#profile.sleepAfterCommand) {

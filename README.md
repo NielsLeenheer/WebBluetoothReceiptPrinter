@@ -120,7 +120,7 @@ The constructor accepts the following options:
 -   `renderer`<br>
     A renderer class, or a function that returns a renderer class, possibly as a promise. Required for printers that can only print graphics. When such a printer is connected without a renderer, connecting fails with an error.
 -   `rendererOptions`<br>
-    An object with additional options for the renderer, such as `font`. The `width`, `commands`, `maxHeight` and `codepageMapping` options belong to the printer and to the renderer and are always set by this library.
+    An object with additional options for the renderer, such as `font`. The `width`, `commands`, `maxHeight`, `feedThreshold` and `codepageMapping` options belong to the printer and to the renderer and are always set by this library.
 
 The `connected` event reports the language and the code page mapping of the renderer, not of the printer, because that is the language you have to encode your receipt in. With the ESC/POS renderer you get `esc-pos` and `epson`. It also reports `columns`, which is 32 for these 384 dot printers.
 

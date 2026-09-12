@@ -15,10 +15,10 @@
 	The CRC8 is computed over the payload only, with the standard table for polynomial
 	0x07 and initial value 0.
 
-	The printer buffer is small, so the driver sends one packet per write and paces the
-	writes with the sleepAfterCommand of the profile. That is why this wrapper returns a
-	list of packets instead of one buffer, unlike the Star raster wrapper of the USB
-	driver.
+	The printer buffer is small, so the driver paces its writes with the sleepAfterCommand
+	of the profile. That is why this wrapper returns a list of packets instead of one
+	buffer, unlike the Star raster wrapper of the USB driver: the driver packs as many
+	whole packets as fit into one write of messageSize bytes, and never splits one.
 
 */
 
@@ -47,6 +47,9 @@ const Commands = {
 
 	/* One bitmap row of 384 dots 							A2, 48 bytes 			*/
 	drawBitmap:			0xa2,
+
+	/* One run length encoded bitmap row 					BF, one byte per run 	*/
+	drawCompressed:		0xbf,
 
 	/* Feed the paper 										A1, two bytes, LE 		*/
 	feedPaper:			0xa1
@@ -137,6 +140,116 @@ for (let i = 0; i < 256; i++) {
 }
 
 
+/*
+	Run length encoding of a row, the BF command.
+
+	The reference for this is rbaron's catprinter, catprinter/cmds.py, in the three
+	functions cmd_print_row(), run_length_encode() and encode_run_length_repetition().
+
+		encode_run_length_repetition(n, val)	while n > 0x7f: res.append(0x7f | (val << 7))
+												n -= 0x7f, and then (val << 7) | n
+
+	So one byte is a run: bit 7 is the value of the dots, 1 is black, and bits 0 to 6 are
+	the length of the run, 1 to 127. A run that is longer is split into several bytes of
+	the same value. The runs cover the row from the leftmost dot to the rightmost, and
+	together they have to add up to the full width of the print head, 384 dots, because
+	that is what the printer draws.
+
+	The dot order is the difference with the raw A2 row. The A2 payload is a bitmap, and
+	byte_encode() of the reference builds it with 1 << bit_index for the dot at bit_index,
+	so the leftmost dot of a byte is its least significant bit, which is why a row of the
+	renderer, which is most significant bit first, is reversed byte by byte. A run byte
+	carries no bitmap, so there is nothing to reverse: the runs are simply in the order
+	the dots are printed.
+
+	cmd_print_row() encodes the row and falls back to the raw bitmap when the result is
+	longer than PRINT_WIDTH // 8, the 48 bytes of an uncompressed row, because a longer
+	payload would cost more to send than the bitmap it replaces. The choice is per row:
+	a row of text compresses to a fraction of 48 bytes, a dithered photograph or a row of
+	alternating dots does not compress at all and is sent raw.
+*/
+
+/**
+ * Encode one row as runs of equal dots
+ *
+ * @param  {Uint8Array}  row        The row, most significant bit first, the leftmost dot first
+ * @return {Array}                  One byte per run, value in bit 7 and length in bits 0 to 6
+ */
+function runLengthEncode(row) {
+	let result = [];
+	let value = -1;
+	let run = 0;
+
+	for (let i = 0; i < row.length * 8; i++) {
+		let dot = (row[i >> 3] >> (7 - (i & 0x07))) & 0x01;
+
+		if (dot == value) {
+			run++;
+			continue;
+		}
+
+		if (run > 0) {
+			appendRun(result, run, value);
+		}
+
+		value = dot;
+		run = 1;
+	}
+
+	if (run > 0) {
+		appendRun(result, run, value);
+	}
+
+	return result;
+}
+
+/**
+ * Append one run to an encoded row, split over several bytes when it is longer than 127
+ *
+ * @param  {Array}       result     The bytes of the encoded row so far
+ * @param  {number}      run        The length of the run, in dots
+ * @param  {number}      value      The value of the dots, 1 is black
+ */
+function appendRun(result, run, value) {
+	while (run > 0x7f) {
+		result.push(0x7f | (value << 7));
+		run -= 0x7f;
+	}
+
+	if (run > 0) {
+		result.push((value << 7) | run);
+	}
+}
+
+/**
+ * Encode one row in the shortest of the two row formats
+ *
+ * @param  {Uint8Array}  row        The row, most significant bit first, the full print width
+ * @return {object}                 The command byte and the payload of the row packet
+ */
+function encodeRow(row) {
+	let compressed = runLengthEncode(row);
+
+	/*
+		A payload that is longer than the bitmap it replaces is not worth sending, so the
+		row falls back to the raw bitmap, with every byte reversed. The comparison is the
+		one of the reference implementation, which keeps the runs when they are exactly as
+		long as the bitmap.
+	*/
+
+	if (compressed.length <= row.length) {
+		return { command: Commands.drawCompressed, payload: compressed };
+	}
+
+	let raw = new Uint8Array(row.length);
+
+	for (let i = 0; i < row.length; i++) {
+		raw[i] = Reversed[row[i]];
+	}
+
+	return { command: Commands.drawBitmap, payload: raw };
+}
+
 /**
  * Wrap a list of renderer items in cat printer packets
  *
@@ -156,6 +269,10 @@ function wrap(items, options) {
 	let speed = clamp(options.speed, Defaults.speed, 0, 0xff);
 	let energy = clamp(options.energy, Defaults.energy, 0, 0xffff);
 	let feed = clamp(options.feed, Defaults.feed, 0, 0xffff);
+
+	/* Run length encoded rows can be switched off in the graphics section of a profile, for a printer that does not accept them */
+
+	let compress = options.compress !== false;
 
 	if (width % 8 != 0) {
 		throw new Error('The width of the print area must be a multiple of eight dots, not ' + width);
@@ -182,7 +299,7 @@ function wrap(items, options) {
 	for (let item of items) {
 		switch (item.type) {
 
-			/* One packet per row, the bytes reversed and padded to the print width */
+			/* One packet per row, padded to the print width, compressed when that helps */
 
 			case 'image':
 				/*
@@ -201,10 +318,12 @@ function wrap(items, options) {
 					let row = new Uint8Array(stride);
 
 					for (let x = 0; x < source; x++) {
-						row[x] = Reversed[item.data[y * source + x] || 0x00];
+						row[x] = item.data[y * source + x] || 0x00;
 					}
 
-					packets.push(packet(Commands.drawBitmap, row));
+					let encoded = compress ? encodeRow(row) : { command: Commands.drawBitmap, payload: Array.from(row, reverseBits) };
+
+					packets.push(packet(encoded.command, encoded.payload));
 				}
 
 				break;
@@ -306,4 +425,4 @@ function clamp(value, fallback, min, max) {
 	return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-export { wrap, packet, crc8, reverseBits, Commands, FlowControl };
+export { wrap, packet, crc8, reverseBits, encodeRow, runLengthEncode, Commands, FlowControl };

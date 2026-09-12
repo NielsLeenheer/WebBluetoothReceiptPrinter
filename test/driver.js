@@ -58,6 +58,12 @@ function install(uuid, name) {
 			}
 
 			state.writes.push(Array.from(data));
+
+			/* A test can answer a write, the way the printer answers with flow control */
+
+			if (state.onWrite) {
+				state.onWrite(state.writes.length);
+			}
 		},
 
 		writeValueWithoutResponse: async (data) => {
@@ -125,6 +131,23 @@ class FakeRenderer {
 
 		return [
 			{ type: 'image', width: 384, height: 1, data: new Uint8Array(48).fill(0x0f) },
+			{ type: 'feed', height: 24 }
+		];
+	}
+}
+
+/*
+	A renderer with more rows than fit in one write. The rows are 0x0f bytes, four dots on
+	and four off, which needs 96 bytes of runs and is therefore sent as a raw row of 48
+	bytes in a packet of 56, so the batches are the ones counted in the test below.
+*/
+
+class TallFakeRenderer {
+	static language = 'esc-pos';
+
+	render() {
+		return [
+			{ type: 'image', width: 384, height: 10, data: new Uint8Array(480).fill(0x0f) },
 			{ type: 'feed', height: 24 }
 		];
 	}
@@ -232,6 +255,7 @@ describe('driver', () => {
 				width:				384,
 				commands:			[ 'feed' ],
 				maxHeight:			256,
+				feedThreshold:		4,
 				codepageMapping:	'epson'
 			});
 		});
@@ -250,19 +274,54 @@ describe('driver', () => {
 			expect(state.subscribed.length).to.equal(1);
 		});
 
-		it('should render, wrap and write one packet per write', async () => {
+		it('should render, wrap and batch the packets into one write', async () => {
 			let state = install(Services.cat, 'GB01');
 			let printer = new WebBluetoothReceiptPrinter({ renderer: FakeRenderer });
 
 			await printer.connect();
 			await printer.print(new Uint8Array([ 0x1b, 0x40, 0x41 ]));
 
+			/*
+				The eleven packets of this job are 169 bytes together, which is less than
+				the 200 of the profile, so they are one write.
+			*/
+
 			expect(FakeRenderer.bytes).to.deep.equal([ 0x1b, 0x40, 0x41 ]);
-			expect(state.writes.length).to.equal(11);
-			expect(state.writes[0]).to.deep.equal([ 0x51, 0x78, 0xa3, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff ]);
-			expect(state.writes[7].slice(0, 8)).to.deep.equal([ 0x51, 0x78, 0xa2, 0x00, 0x30, 0x00, 0xf0, 0xf0 ]);
-			expect(state.writes[8]).to.deep.equal([ 0x51, 0x78, 0xa1, 0x00, 0x02, 0x00, 0x18, 0x00, 0xff, 0xff ]);
-			expect(state.writes[10]).to.deep.equal([ 0x51, 0x78, 0xa1, 0x00, 0x02, 0x00, 0x60, 0x00, 0xf5, 0xff ]);
+			expect(state.writes.length).to.equal(1);
+			expect(state.writes[0].length).to.equal(169);
+			expect(state.writes[0].slice(0, 9)).to.deep.equal([ 0x51, 0x78, 0xa3, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff ]);
+			expect(state.writes[0].slice(74, 82)).to.deep.equal([ 0x51, 0x78, 0xa2, 0x00, 0x30, 0x00, 0xf0, 0xf0 ]);
+			expect(state.writes[0].slice(130, 140)).to.deep.equal([ 0x51, 0x78, 0xa1, 0x00, 0x02, 0x00, 0x18, 0x00, 0xff, 0xff ]);
+			expect(state.writes[0].slice(159)).to.deep.equal([ 0x51, 0x78, 0xa1, 0x00, 0x02, 0x00, 0x60, 0x00, 0xf5, 0xff ]);
+		});
+
+		it('should fill every write with as many whole packets as fit', async () => {
+			let state = install(Services.cat, 'GB01');
+			let printer = new WebBluetoothReceiptPrinter({ renderer: TallFakeRenderer });
+
+			await printer.connect();
+			await printer.print(new Uint8Array([ 0x41 ]));
+
+			/*
+				Twenty packets: the seven of the job settings, ten rows of 56 bytes, the
+				feed item, the lattice end and the final feed. The first write takes the
+				settings and the two rows that still fit, then three rows per write, and
+				the last row goes with the end of the job.
+			*/
+
+			expect(state.writes.map(i => i.length)).to.deep.equal([ 186, 168, 168, 151 ]);
+
+			/* No packet is cut in half, so every write begins with the magic */
+
+			for (let write of state.writes) {
+				expect(write.slice(0, 2)).to.deep.equal([ 0x51, 0x78 ]);
+			}
+
+			/* The three rows of the second write, one after the other */
+
+			expect(state.writes[1].slice(0, 6)).to.deep.equal([ 0x51, 0x78, 0xa2, 0x00, 0x30, 0x00 ]);
+			expect(state.writes[1].slice(56, 62)).to.deep.equal([ 0x51, 0x78, 0xa2, 0x00, 0x30, 0x00 ]);
+			expect(state.writes[1].slice(112, 118)).to.deep.equal([ 0x51, 0x78, 0xa2, 0x00, 0x30, 0x00 ]);
 		});
 
 		it('should write without response when the print characteristic only allows that', async () => {
@@ -275,8 +334,8 @@ describe('driver', () => {
 			await printer.print(new Uint8Array([ 0x1b, 0x40, 0x41 ]));
 
 			expect(state.writes.length).to.equal(0);
-			expect(state.unacknowledged.length).to.equal(11);
-			expect(state.unacknowledged[0]).to.deep.equal([ 0x51, 0x78, 0xa3, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff ]);
+			expect(state.unacknowledged.length).to.equal(1);
+			expect(state.unacknowledged[0].slice(0, 9)).to.deep.equal([ 0x51, 0x78, 0xa3, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff ]);
 		});
 
 		it('should join everything one print() was given into one job', async () => {
@@ -323,7 +382,34 @@ describe('driver', () => {
 
 			await job;
 
-			expect(state.writes.length).to.equal(11);
+			expect(state.writes.length).to.equal(1);
+		});
+
+		it('should stop between two batches when the pause arrives halfway', async () => {
+			let state = install(Services.cat, 'GB01');
+			let printer = new WebBluetoothReceiptPrinter({ renderer: TallFakeRenderer });
+
+			await printer.connect();
+
+			/* The printer fills up and asks for a stop after it received the first write */
+
+			state.onWrite = (count) => {
+				if (count == 1) {
+					state.emit([ 0x51, 0x78, 0xae, 0x01, 0x01, 0x00, 0x10, 0x70, 0xff ]);
+				}
+			};
+
+			let job = printer.print(new Uint8Array([ 0x41 ]));
+
+			await wait(80);
+
+			expect(state.writes.length).to.equal(1);
+
+			state.emit([ 0x51, 0x78, 0xae, 0x01, 0x01, 0x00, 0x00, 0x00, 0xff ]);
+
+			await job;
+
+			expect(state.writes.map(i => i.length)).to.deep.equal([ 186, 168, 168, 151 ]);
 		});
 
 		it('should continue by itself when the resume never arrives', async () => {
@@ -353,7 +439,7 @@ describe('driver', () => {
 
 				await job;
 
-				expect(state.writes.length).to.equal(11);
+				expect(state.writes.length).to.equal(1);
 			}
 			finally {
 				globalThis.setTimeout = real;

@@ -667,7 +667,18 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 			return;
 		}
 
-		await this.#characteristics.print.writeValueWithResponse(data);
+		/*
+			Some printers, such as the MX10 cat printer, only allow writing without a
+			response on their print characteristic, so follow what it advertises.
+		*/
+
+		let properties = this.#characteristics.print.properties;
+
+		if (properties && !properties.write && properties.writeWithoutResponse) {
+			await this.#characteristics.print.writeValueWithoutResponse(data);
+		} else {
+			await this.#characteristics.print.writeValueWithResponse(data);
+		}
 	}
 
 	async #evaluate(expression) {

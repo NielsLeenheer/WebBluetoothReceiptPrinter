@@ -24,7 +24,9 @@ function install(uuid, name) {
 		subscribed:		[],
 		listeners:		[],
 		disconnects:	0,
-		failNotify:		false
+		failNotify:		false,
+		withoutResponse: false,
+		unacknowledged:	[]
 	};
 
 	let characteristic = (id) => ({
@@ -42,8 +44,24 @@ function install(uuid, name) {
 			state.listeners.push(f);
 		},
 
+		/* The MX10 only allows writes without a response on its print characteristic */
+
+		get properties() {
+			return state.withoutResponse ?
+				{ write: false, writeWithoutResponse: true, notify: true } :
+				{ write: true, writeWithoutResponse: true, notify: true };
+		},
+
 		writeValueWithResponse: async (data) => {
+			if (state.withoutResponse) {
+				throw new Error('GATT operation failed for unknown reason.');
+			}
+
 			state.writes.push(Array.from(data));
+		},
+
+		writeValueWithoutResponse: async (data) => {
+			state.unacknowledged.push(Array.from(data));
 		}
 	});
 
@@ -245,6 +263,20 @@ describe('driver', () => {
 			expect(state.writes[7].slice(0, 8)).to.deep.equal([ 0x51, 0x78, 0xa2, 0x00, 0x30, 0x00, 0xf0, 0xf0 ]);
 			expect(state.writes[8]).to.deep.equal([ 0x51, 0x78, 0xa1, 0x00, 0x02, 0x00, 0x18, 0x00, 0xff, 0xff ]);
 			expect(state.writes[10]).to.deep.equal([ 0x51, 0x78, 0xa1, 0x00, 0x02, 0x00, 0x60, 0x00, 0xf5, 0xff ]);
+		});
+
+		it('should write without response when the print characteristic only allows that', async () => {
+			let state = install(Services.cat, 'MX10');
+			state.withoutResponse = true;
+
+			let printer = new WebBluetoothReceiptPrinter({ renderer: FakeRenderer });
+
+			await printer.connect();
+			await printer.print(new Uint8Array([ 0x1b, 0x40, 0x41 ]));
+
+			expect(state.writes.length).to.equal(0);
+			expect(state.unacknowledged.length).to.equal(11);
+			expect(state.unacknowledged[0]).to.deep.equal([ 0x51, 0x78, 0xa3, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff ]);
 		});
 
 		it('should join everything one print() was given into one job', async () => {

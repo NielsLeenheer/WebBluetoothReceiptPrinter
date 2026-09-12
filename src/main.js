@@ -155,10 +155,19 @@ const DeviceProfiles = [
 
 	/* Cat printer */
 	{
+		/*
+			Not every cat printer advertises its AE30 service, the MX10 for example does
+			not, and the device picker only sees what is advertised. The known model
+			names are therefore accepted as well, the service is checked after connecting.
+		*/
+
 		filters: [ 
 			{ 
 				services: 	[ '0000ae30-0000-1000-8000-00805f9b34fb' ] 
-			} 
+			},
+			{ namePrefix: 'GB01' }, { namePrefix: 'GB02' }, { namePrefix: 'GB03' },
+			{ namePrefix: 'GT01' }, { namePrefix: 'YT01' }, { namePrefix: 'MXTP' },
+			{ namePrefix: 'MX05' }, { namePrefix: 'MX06' }, { namePrefix: 'MX08' }, { namePrefix: 'MX10' }
 		],
 		
 		functions: {
@@ -705,7 +714,7 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 		}
 
 		if (filter.namePrefix) {
-			if (!this.#device.name.startsWith(filter.namePrefix)) {
+			if (!this.#device.name || !this.#device.name.startsWith(filter.namePrefix)) {
 				return false;
 			}
 		}

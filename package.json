@@ -52,5 +52,8 @@
     "@point-of-sale/receipt-printer-renderer": {
       "optional": true
     }
+  },
+  "dependencies": {
+    "@point-of-sale/meow-printer-encoder": "^1.0.0"
   }
 }

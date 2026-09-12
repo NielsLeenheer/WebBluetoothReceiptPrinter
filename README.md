@@ -142,6 +142,8 @@ These printers have no cutter and no cash drawer, so cutting and opening the dra
 
 Because the buffer of these printers is small, they tell the driver to stop writing when they cannot keep up and to continue when they have room again. The driver does that for you. If the printer forgets to ask the driver to continue, it continues by itself after thirty seconds and logs that it did.
 
+The images the renderer produces are turned into the packets of the protocol by [`@point-of-sale/meow-printer-encoder`](https://github.com/NielsLeenheer/MeowPrinterEncoder), which is a regular dependency of this library: it is tiny, it has no dependencies of its own and it is part of every bundle. Its README documents the packet framing, the commands, the run length encoded rows and the flow control packets. Pacing the writes stays the job of this driver.
+
 ### Send the packets yourself
 
 Without the `renderer` option nothing changes: the `connected` event reports `meow` as the language and no columns, and everything you pass to `print()` is sent to the printer unchanged, chunked into writes of 200 bytes with a short pause between them. Building the packets of the protocol, and keeping up with the printer, is then entirely up to your application.
@@ -149,6 +151,8 @@ Without the `renderer` option nothing changes: the `connected` event reports `me
 ```js
 const receiptPrinter = new WebBluetoothReceiptPrinter();
 ```
+
+If you want to build the packets yourself but would rather not write them out by hand, `@point-of-sale/meow-printer-encoder` can be used on its own as well.
 
 ### Errors
 

@@ -1,14 +1,22 @@
 import EventEmitter from "./event-emitter.js";
 import CallbackQueue from "./callback-queue.js";
-import { wrap as meow, FlowControl } from "./wrappers/meow.js";
+import MeowPrinterEncoder from "@point-of-sale/meow-printer-encoder";
 
 /*
 	Wrappers turn the items of a renderer into the wire format of a printer. A profile
-	that needs rendering names the wrapper it needs in its graphics section.
+	that needs rendering names the wrapper it needs in its graphics section. The wire
+	formats themselves live in their own packages, one encoder per protocol, and a
+	wrapper is the line that hands the items of the renderer to one of them.
 */
 
 const Wrappers = {
-	'meow':				meow
+	'meow':				(items, options) => new MeowPrinterEncoder({
+							width:		options.width,
+							energy:		options.energy,
+							speed:		options.speed,
+							feed:		options.feed,
+							compress:	options.compress
+						}).encode(items)
 };
 
 /*
@@ -614,11 +622,11 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 		*/
 
 		if (this.#graphics) {
-			if (this.#matches(value, FlowControl.pause)) {
+			if (MeowPrinterEncoder.isPause(value)) {
 				this.#pause();
 			}
 
-			if (this.#matches(value, FlowControl.resume)) {
+			if (MeowPrinterEncoder.isResume(value)) {
 				this.#resume();
 			}
 		}
@@ -659,27 +667,6 @@ class WebBluetoothReceiptPrinter extends ReceiptPrinterDriver {
 		}
 
 		this.#queue.resume();
-	}
-
-	/**
-	 * Compare a notification with a known packet
-	 *
-	 * @param  {DataView}    value      The bytes of the notification
-	 * @param  {Array}       packet     The bytes of the packet to compare it with
-	 * @return {boolean}                Whether the notification is that packet
-	 */
-	#matches(value, packet) {
-		if (!value || value.byteLength != packet.length) {
-			return false;
-		}
-
-		for (let i = 0; i < packet.length; i++) {
-			if (value.getUint8(i) != packet[i]) {
-				return false;
-			}
-		}
-
-		return true;
 	}
 
 	/**

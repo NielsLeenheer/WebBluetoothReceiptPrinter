@@ -5,7 +5,7 @@ This is an library that allows you to print to a Bluetooth connected receipt pri
 <br>
 
 [![npm](https://img.shields.io/npm/v/@point-of-sale/webbluetooth-receipt-printer)](https://www.npmjs.com/@point-of-sale/webbluetooth-receipt-printer)
-![GitHub License](https://img.shields.io/github/license/NielsLeenheer/WebBluetoothReceiptPrinter)
+![GitHub License](https://img.shields.io/github/license/at-point-of-sale/WebBluetoothReceiptPrinter)
 
 
 > This library is part of [@point-of-sale](https://point-of-sale.dev), a collection of libraries for interfacing browsers and Node with Point of Sale devices such as receipt printers, barcode scanners and customer facing displays.
@@ -14,7 +14,7 @@ This is an library that allows you to print to a Bluetooth connected receipt pri
 
 ## What does this library do?
 
-In order to print a receipt on a receipt printer you need to build the receipt and encode it as in the ESC/POS or StarPRNT language. You can use the [`ReceiptPrinterEncoder`](https://github.com/NielsLeenheer/ReceiptPrinterEncoder) library for this. You end up with an array of raw bytes that needs to be send to the printer. One way to do that is using this library and WebBluetooth.
+In order to print a receipt on a receipt printer you need to build the receipt and encode it as in the ESC/POS or StarPRNT language. You can use the [`ReceiptPrinterEncoder`](https://github.com/at-point-of-sale/ReceiptPrinterEncoder) library for this. You end up with an array of raw bytes that needs to be send to the printer. One way to do that is using this library and WebBluetooth.
 
 <br>
 
@@ -101,7 +101,7 @@ There are two ways to use them: you let this library render the receipt for you,
 
 ### Let this library render the receipt
 
-You can use `ReceiptPrinterEncoder` the way you always do. You just have to give this library a renderer, which turns the encoded receipt into images before it is sent to the printer. The renderer lives in a separate package, [`@point-of-sale/receipt-printer-renderer`](https://github.com/NielsLeenheer/ReceiptPrinterRenderer), which you install yourself. It is an optional peer dependency, so it is only in your bundle when you actually use it.
+You can use `ReceiptPrinterEncoder` the way you always do. You just have to give this library a renderer, which turns the encoded receipt into images before it is sent to the printer. The renderer lives in a separate package, [`@point-of-sale/receipt-printer-renderer`](https://github.com/at-point-of-sale/ReceiptPrinterRenderer), which you install yourself. It is an optional peer dependency, so it is only in your bundle when you actually use it.
 
 ```js
 import ReceiptPrinterRenderer from '@point-of-sale/receipt-printer-renderer';
@@ -142,7 +142,7 @@ These printers have no cutter and no cash drawer, so cutting and opening the dra
 
 Because the buffer of these printers is small, they tell the driver to stop writing when they cannot keep up and to continue when they have room again. The driver does that for you. If the printer forgets to ask the driver to continue, it continues by itself after thirty seconds and logs that it did.
 
-The images the renderer produces are turned into the packets of the protocol by [`@point-of-sale/meow-printer-encoder`](https://github.com/NielsLeenheer/MeowPrinterEncoder), which is a regular dependency of this library: it is tiny, it has no dependencies of its own and it is part of every bundle. Its README documents the packet framing, the commands, the run length encoded rows and the flow control packets. Pacing the writes stays the job of this driver.
+The images the renderer produces are turned into the packets of the protocol by [`@point-of-sale/meow-printer-encoder`](https://github.com/at-point-of-sale/MeowPrinterEncoder), which is a regular dependency of this library: it is tiny, it has no dependencies of its own and it is part of every bundle. Its README documents the packet framing, the commands, the run length encoded rows and the flow control packets. Pacing the writes stays the job of this driver.
 
 ### Send the packets yourself
 

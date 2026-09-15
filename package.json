@@ -12,7 +12,7 @@
   "module": "src/main.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NielsLeenheer/WebBluetoothReceiptPrinter.git"
+    "url": "git+https://github.com/at-point-of-sale/WebBluetoothReceiptPrinter.git"
   },
   "keywords": [
     "bluetooth",
@@ -26,9 +26,9 @@
   "author": "Niels Leenheer",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/NielsLeenheer/WebBluetoothReceiptPrinter/issues"
+    "url": "https://github.com/at-point-of-sale/WebBluetoothReceiptPrinter/issues"
   },
-  "homepage": "https://github.com/NielsLeenheer/WebBluetoothReceiptPrinter#readme",
+  "homepage": "https://github.com/at-point-of-sale/WebBluetoothReceiptPrinter#readme",
   "devDependencies": {
     "@rollup/plugin-commonjs": "^24.1.0",
     "@rollup/plugin-node-resolve": "^15.0.2",
